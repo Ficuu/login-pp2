@@ -1,13 +1,13 @@
 /**
  * Validaciones que se corren en el servidor antes de viajar al registro
  * (y en el cliente, para no hacer el viaje al pedo). Comparten reglas con
- * el padrón: minimo 8 caracteres, maximo 72 BYTES por el limite de bcrypt.
+ * el padrón: mínimo 8 caracteres, máximo 72 BYTES por el límite de bcrypt.
  */
 
 export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX_BYTES = 72;
 
-/** El padrón normaliza el email a minusculas y sin espacios: hacemos lo mismo. */
+/** El padrón normaliza el email a minúsculas y sin espacios: hacemos lo mismo. */
 export function normalizarEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -19,14 +19,14 @@ export function bytesDe(texto: string): number {
 export function errorDeEmail(email: string): string | undefined {
   const limpio = normalizarEmail(email);
   if (!limpio) return "Ingresá tu email.";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpio)) return "Ese email no parece valido.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpio)) return "Ese email no parece válido.";
   return undefined;
 }
 
 export function errorDePassword(password: string): string | undefined {
   if (!password) return "Ingresá tu contraseña.";
   if (password.length < PASSWORD_MIN) return `La contraseña necesita al menos ${PASSWORD_MIN} caracteres.`;
-  if (bytesDe(password) > PASSWORD_MAX_BYTES) return "La contraseña es demasiado larga (maximo 72 bytes).";
+  if (bytesDe(password) > PASSWORD_MAX_BYTES) return "La contraseña es demasiado larga (máximo 72 bytes).";
   return undefined;
 }
 

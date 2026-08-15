@@ -18,7 +18,7 @@ export function FormularioAlta({ emailInicial = "" }: { emailInicial?: string })
   // otro proyecto. No hay que crearle nada nuevo, hay que pedirle LA contraseña
   // que ya tenía y reenviar el mismo formulario: eso la vincula a este proyecto.
   const yaEstaEnPP2 = estado.codigo === "EMAIL_EN_USO";
-  const yaEstaAcá = estado.codigo === "USUARIO_YA_REGISTRADO";
+  const yaEstaEnEsteProyecto = estado.codigo === "USUARIO_YA_REGISTRADO";
 
   return (
     <form action={accion} noValidate>
@@ -32,7 +32,7 @@ export function FormularioAlta({ emailInicial = "" }: { emailInicial?: string })
       {estado.mensaje && !yaEstaEnPP2 ? (
         <p className="alerta error" role="alert">
           {estado.mensaje}
-          {yaEstaAcá ? (
+          {yaEstaEnEsteProyecto ? (
             <>
               {" "}
               <Link href={`/login?email=${encodeURIComponent(email)}`}>Iniciar sesión</Link>.
