@@ -4,11 +4,12 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
-import { login, registrar } from "@/lib/registro";
+import { login, registrar } from "@/lib/padron";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
   errorDePassword,
+  errorDeProyecto,
   errorDeTexto,
   juntarErrores,
   normalizarEmail,
@@ -22,49 +23,53 @@ export async function accionAlta(
   const apellido = String(datosFormulario.get("apellido") ?? "").trim();
   const email = normalizarEmail(String(datosFormulario.get("email") ?? ""));
   const password = String(datosFormulario.get("password") ?? "");
-  const telefono = String(datosFormulario.get("telefono") ?? "").trim();
+  const proyecto = String(datosFormulario.get("proyecto_id") ?? "");
 
-  const valores = { nombre, apellido, email, telefono };
+  const valores = { nombre, apellido, email, proyecto_id: proyecto };
 
   const campos = juntarErrores({
     nombre: errorDeTexto(nombre, "nombre"),
     apellido: errorDeTexto(apellido, "apellido"),
     email: errorDeEmail(email),
     password: errorDePassword(password),
+    proyecto_id: errorDeProyecto(proyecto),
   });
   if (Object.keys(campos).length > 0) {
     return { campos, valores };
   }
 
-  let alta;
   try {
-    alta = await registrar({
+    await registrar({
       nombre,
       apellido,
       email,
       password,
-      ...(telefono ? { telefono } : {}),
+      proyecto_id: Number(proyecto),
     });
   } catch (error) {
     return {
       mensaje: mensajeDeError(error),
-      // EMAIL_EN_USO no es un fracaso: la persona ya esta en el padrón y con
-      // SU contraseña de PP2 este mismo formulario la vincula al proyecto.
       codigo: codigoDeError(error),
       campos: erroresPorCampo(error),
       valores,
     };
   }
 
-  // El alta no devuelve token: pedimos uno con las mismas credenciales para
-  // dejarla adentro sin un segundo formulario.
+  // El alta no devuelve sesión: validamos las mismas credenciales para dejar a
+  // la persona adentro sin un segundo formulario. Esto además confirma que la
+  // contraseña que mandó es la de esa cuenta: el padrón reusa por email y, si
+  // el email ya existía, la contraseña que viajó en el alta se descarta.
+  let usuario;
   try {
-    const sesionNueva = await login(email, password);
-    guardarCookieSesion(sesionNueva.token, sesionNueva.expira_en);
+    usuario = await login(email, password);
   } catch (error) {
-    console.error("[alta] la cuenta se creo pero el login automatico fallo", error);
+    console.error("[alta] la cuenta quedó registrada pero el login automático falló", error);
     redirect(`/login?motivo=alta-ok&email=${encodeURIComponent(email)}`);
   }
 
-  redirect(alta.vinculado ? "/cuenta?bienvenida=vinculado" : "/cuenta?bienvenida=nuevo");
+  // Entra derecho al proyecto que acaba de elegir en el alta.
+  const yaEstaba = usuario.proyectos.length > 1;
+  guardarCookieSesion(usuario.id, Number(proyecto));
+
+  redirect(yaEstaba ? "/cuenta?bienvenida=vinculado" : "/cuenta?bienvenida=nuevo");
 }

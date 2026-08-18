@@ -1,13 +1,13 @@
+import Link from "next/link";
+
 import { BotonSalir } from "@/components/boton-salir";
-import { FormularioPassword } from "@/components/formulario-password";
-import { FormularioPerfil } from "@/components/formulario-perfil";
 import { requerirSesion } from "@/lib/sesion";
 
-// Sin cache: la sesion se valida contra el registro en cada visita.
+// Sin cache: la sesión y los proyectos se releen del padrón en cada visita.
 export const dynamic = "force-dynamic";
 
 const BIENVENIDAS: Record<string, string> = {
-  vinculado: "Usamos la cuenta que ya tenías en PP2 y la vinculamos a este proyecto.",
+  vinculado: "Listo, te sumamos a este proyecto con la cuenta que ya tenías.",
   nuevo: "Listo, tu cuenta quedó creada.",
 };
 
@@ -15,20 +15,16 @@ type Props = {
   searchParams: { bienvenida?: string };
 };
 
-function fecha(iso: string): string {
-  const valor = new Date(iso);
-  return Number.isNaN(valor.getTime())
-    ? iso
-    : valor.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" });
+function fecha(valor: Date): string {
+  return valor.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" });
 }
 
 export default async function PaginaCuenta({ searchParams }: Props) {
-  // Si el token no sirve, esto redirige solo: no sigue renderizando.
-  const { usuario, sesion } = await requerirSesion();
+  // Si la sesión no sirve o no hay proyecto elegido, esto redirige solo.
+  const { usuario, proyecto, vence } = await requerirSesion();
 
-  const bienvenida = searchParams.bienvenida
-    ? BIENVENIDAS[searchParams.bienvenida]
-    : undefined;
+  const otros = usuario.proyectos.filter((otro) => otro.id !== proyecto.id);
+  const bienvenida = searchParams.bienvenida ? BIENVENIDAS[searchParams.bienvenida] : undefined;
 
   return (
     <>
@@ -38,7 +34,7 @@ export default async function PaginaCuenta({ searchParams }: Props) {
             Hola, {usuario.nombre} {usuario.apellido}
           </h1>
           <p className="bajada" style={{ margin: 0 }}>
-            Estás dentro de Login PP2 con tu cuenta del registro central.
+            Estás trabajando en <strong>{proyecto.nombre}</strong>.
           </p>
         </div>
         <BotonSalir />
@@ -58,41 +54,55 @@ export default async function PaginaCuenta({ searchParams }: Props) {
             <dd>{usuario.email}</dd>
           </div>
           <div>
-            <dt>UID en el padrón</dt>
-            <dd>{usuario.uid}</dd>
+            <dt>Id en el padrón</dt>
+            <dd>{usuario.id}</dd>
           </div>
-          {usuario.registro ? (
-            <div>
-              <dt>Estado en este proyecto</dt>
-              <dd>
-                {usuario.registro.estado}
-                {usuario.registro.rol_externo ? ` - ${usuario.registro.rol_externo}` : ""}
-              </dd>
-            </div>
-          ) : null}
+          <div>
+            <dt>Proyecto activo</dt>
+            <dd>{proyecto.nombre}</dd>
+          </div>
           <div>
             <dt>La sesión vence</dt>
-            <dd>{fecha(sesion.expira_en)}</dd>
+            <dd>{fecha(vence)}</dd>
           </div>
         </dl>
       </div>
 
       <div className="tarjeta">
-        <h2>Editar mis datos</h2>
-        <FormularioPerfil
-          nombre={usuario.nombre}
-          apellido={usuario.apellido}
-          telefono={usuario.telefono}
-          documento={usuario.documento}
-        />
+        <h2>Tus proyectos</h2>
+        {otros.length > 0 ? (
+          <>
+            <p className="bajada">
+              Estás registrado en {usuario.proyectos.length} proyectos. Cambiar de proyecto no
+              te pide la contraseña de nuevo: sos la misma persona, cambia el alcance.
+            </p>
+            <ul className="proyectos lista">
+              {usuario.proyectos.map((otro) => (
+                <li key={otro.id}>
+                  <span>{otro.nombre}</span>
+                  {otro.id === proyecto.id ? <span className="etiqueta">activo</span> : null}
+                </li>
+              ))}
+            </ul>
+            <p>
+              <Link href="/elegir-proyecto">Cambiar de proyecto</Link>
+            </p>
+          </>
+        ) : (
+          <p className="bajada">
+            Por ahora estás en un solo proyecto: {proyecto.nombre}. Si te suman a otro, va a
+            aparecer acá la próxima vez que entres.
+          </p>
+        )}
       </div>
 
       <div className="tarjeta">
-        <h2>Cambiar contraseña</h2>
+        <h2>Tus datos</h2>
         <p className="bajada">
-          Cambiarla cierra tus otras sesiones abiertas en este proyecto.
+          El nombre, el email y la contraseña los administra el Sistema de Registración de
+          PP2, que todavía no expone endpoints para editarlos. Cuando los tenga, se editan
+          desde acá.
         </p>
-        <FormularioPassword />
       </div>
     </>
   );

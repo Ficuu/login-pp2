@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Login PP2",
-  description: "Inicio de sesión contra el registro central de PP2",
+  description: "Inicio de sesión contra el Sistema de Registración de PP2",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

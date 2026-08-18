@@ -11,6 +11,7 @@ const AVISOS: Record<string, string> = {
   expirada: "Tu sesión venció. Volvé a ingresar.",
   cerrada: "Cerraste sesión.",
   "alta-ok": "Cuenta creada. Ingresá con tu email y contraseña.",
+  "sin-proyectos": "Tu cuenta no está asignada a ningún proyecto. Pedile a la cátedra que te sume.",
 };
 
 type Props = {
@@ -29,8 +30,9 @@ export default async function PaginaLogin({ searchParams }: Props) {
       <div className="tarjeta">
         <h1>Iniciar sesión</h1>
         <p className="bajada">
-          Se ingresa con la cuenta del registro central de PP2: la misma para todos los
-          proyectos de la materia.
+          Se ingresa con la cuenta del Sistema de Registración de PP2: la misma para
+          todos los proyectos de la materia. Si estás en más de uno, después elegís
+          con cuál trabajar.
         </p>
 
         {aviso ? (

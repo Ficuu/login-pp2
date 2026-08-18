@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
 
-import { leerToken } from "@/lib/sesion";
+import { leerCookieSesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default function Inicio() {
-  // La validacion de verdad la hace /cuenta contra GET /sesion; acá solo
-  // miramos si hay cookie para no pegarle al registro de gusto.
-  redirect(leerToken() ? "/cuenta" : "/login");
+  // Solo se mira la cookie (firma y vencimiento). Quién es y en qué proyectos
+  // está lo resuelve /cuenta contra el padrón.
+  const sesion = leerCookieSesion();
+  if (!sesion) redirect("/login");
+
+  redirect(sesion.pid ? "/cuenta" : "/elegir-proyecto");
 }

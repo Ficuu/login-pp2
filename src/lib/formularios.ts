@@ -5,7 +5,7 @@
 export type EstadoFormulario = {
   /** Mensaje de error general (arriba del formulario). */
   mensaje?: string;
-  /** Codigo crudo del registro, para que el formulario ofrezca la salida correcta. */
+  /** Codigo crudo del error del padrón, para que el formulario ofrezca la salida correcta. */
   codigo?: string;
   /** Errores por campo, tal como llegan en `error.detalles`. */
   campos?: Record<string, string>;

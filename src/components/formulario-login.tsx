@@ -17,11 +17,11 @@ export function FormularioLogin({ emailInicial = "" }: { emailInicial?: string }
       {estado.mensaje ? (
         <p className="alerta error" role="alert">
           {estado.mensaje}
-          {estado.codigo === "NO_REGISTRADO_EN_APP" ? (
+          {estado.codigo === "SIN_PROYECTOS" ? (
             <>
               {" "}
               <Link href={`/crear-cuenta?email=${encodeURIComponent(email)}`}>
-                Sumate a este proyecto
+                Sumate a un proyecto
               </Link>
               .
             </>

@@ -1,21 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { borrarCookieSesion } from "@/lib/sesion";
+import { NOMBRE_COOKIE } from "@/lib/sesion";
 
 /**
- * Limpieza de cookie sin revocar nada.
+ * Borra la cookie y vuelve a /login.
  *
- * Existe porque un server component no puede borrar cookies: cuando una pagina
- * protegida descubre que el token venció, redirige aca y desde aca se borra la
- * cookie y se vuelve a /login. El logout de verdad (que si revoca el token en
- * el registro) es el server action de /cuenta.
+ * Existe porque un server component no puede borrar cookies: cuando una página
+ * protegida descubre que la sesión ya no sirve (venció, la firma no cierra, la
+ * persona no está más en el padrón), redirige acá.
+ *
+ * Con este padrón el logout es solo esto: no hay token que revocar del otro
+ * lado, la sesión la emitimos y la cortamos nosotros.
  */
 export function GET(request: NextRequest) {
-  borrarCookieSesion();
-
   const motivo = request.nextUrl.searchParams.get("motivo") ?? "expirada";
   const destino = new URL("/login", request.nextUrl.origin);
   destino.searchParams.set("motivo", motivo);
 
-  return NextResponse.redirect(destino);
+  const respuesta = NextResponse.redirect(destino);
+  respuesta.cookies.delete(NOMBRE_COOKIE);
+
+  return respuesta;
 }

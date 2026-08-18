@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
-import { login } from "@/lib/registro";
+import { login } from "@/lib/padron";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
@@ -28,9 +28,9 @@ export async function accionLogin(
     return { campos, valores: { email } };
   }
 
-  let datos;
+  let usuario;
   try {
-    datos = await login(email, password);
+    usuario = await login(email, password);
   } catch (error) {
     return {
       mensaje: mensajeDeError(error),
@@ -40,7 +40,21 @@ export async function accionLogin(
     };
   }
 
-  guardarCookieSesion(datos.token, datos.expira_en);
+  // La contraseña ya quedó probada. Lo único que falta es en qué proyecto se
+  // para: la identidad es una sola, el proyecto es el alcance de la sesión.
+  if (usuario.proyectos.length === 0) {
+    return {
+      mensaje:
+        "Tu cuenta existe pero no está asignada a ningún proyecto. Pedile a la cátedra que te sume.",
+      codigo: "SIN_PROYECTOS",
+      valores: { email },
+    };
+  }
+
+  // Con un solo proyecto no hay nada que elegir: se entra derecho.
+  const unico = usuario.proyectos.length === 1 ? usuario.proyectos[0].id : null;
+  guardarCookieSesion(usuario.id, unico);
+
   // Fuera del try: redirect() corta el flujo lanzando, no es un error.
-  redirect("/cuenta");
+  redirect(unico ? "/cuenta" : "/elegir-proyecto");
 }

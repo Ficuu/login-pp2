@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { FormularioAlta } from "@/components/formulario-alta";
+import { listarProyectos } from "@/lib/padron";
 import { obtenerSesion } from "@/lib/sesion";
 import { normalizarEmail } from "@/lib/validaciones";
 
@@ -14,6 +15,8 @@ type Props = {
 export default async function PaginaAlta({ searchParams }: Props) {
   if (await obtenerSesion()) redirect("/cuenta");
 
+  // El alta del padrón exige un proyecto: no hay cuenta sin al menos uno.
+  const proyectos = await listarProyectos();
   const emailInicial = searchParams.email ? normalizarEmail(searchParams.email) : "";
 
   return (
@@ -21,15 +24,15 @@ export default async function PaginaAlta({ searchParams }: Props) {
       <div className="tarjeta">
         <h1>Crear cuenta</h1>
         <p className="bajada">
-          Una sola identidad para toda la materia. Si ya te registraste en otro proyecto de
-          PP2, usá ese mismo email: te vinculamos a este sin crear una cuenta nueva.
+          La cuenta es del Sistema de Registración de PP2: la misma para todos los proyectos
+          de la materia. Si ya tenés una, este formulario te suma al proyecto que elijas.
         </p>
 
-        <FormularioAlta emailInicial={emailInicial} />
+        <FormularioAlta proyectos={proyectos} emailInicial={emailInicial} />
       </div>
 
       <p className="pie">
-        ¿Ya tenés cuenta acá? <Link href="/login">Iniciar sesión</Link>
+        ¿Ya tenés cuenta? <Link href="/login">Iniciar sesión</Link>
       </p>
     </>
   );

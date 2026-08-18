@@ -1,68 +1,168 @@
 import "server-only";
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { esSesionMuerta } from "./errores";
-import { sesion as pedirSesion, type RespuestaSesion } from "./registro";
+import { buscarPorId, type Proyecto, type Usuario } from "./padron";
 
 /**
- * La sesion vive en una cookie httpOnly: el token nunca lo ve un script del
- * navegador. Guardamos SOLO el token; el uid, el email y el resto salen
- * siempre de `GET /sesion`, que es la fuente de verdad.
+ * La sesión la emitimos NOSOTROS.
+ *
+ * El Sistema de Registración no entrega tokens ni tiene un `GET /sesion` contra
+ * el cual validar, así que después del login firmamos una cookie httpOnly con
+ * HMAC-SHA256 y la verificamos en cada request. Adentro va lo mínimo: quién es
+ * (`uid`) y en qué proyecto está parado (`pid`). El nombre, el email y los
+ * proyectos NO se guardan en la cookie: salen del padrón, que es la fuente de
+ * verdad y puede haber cambiado desde que la persona entró.
  */
+
 export const NOMBRE_COOKIE = "sesion_pp2";
 
-export function leerToken(): string | undefined {
-  return cookies().get(NOMBRE_COOKIE)?.value;
+const SECRETO = process.env.SESION_SECRETO ?? "";
+const HORAS_DE_VIDA = 24;
+
+type Contenido = {
+  /** id del usuario en el padrón. */
+  uid: number;
+  /** id del proyecto elegido. null = todavía no eligió. */
+  pid: number | null;
+  /** vencimiento, en segundos desde época. */
+  exp: number;
+};
+
+export type Sesion = {
+  usuario: Usuario;
+  /** null mientras la persona no haya elegido proyecto. */
+  proyecto: Proyecto | null;
+  vence: Date;
+};
+
+function exigirSecreto(): string {
+  if (SECRETO.length < 32) {
+    // Sin secreto largo la firma no protege nada: cortamos antes de emitir.
+    console.error(
+      "[sesion] falta SESION_SECRETO (o es muy corto: mínimo 32 caracteres). " +
+        "Generá uno con: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    );
+    throw new Error("SESION_SECRETO no está configurado");
+  }
+
+  return SECRETO;
 }
 
-/** Solo desde un server action o un route handler (Next no deja escribir cookies en un page). */
-export function guardarCookieSesion(token: string, expiraEn: string): void {
-  const vence = new Date(expiraEn);
-  cookies().set(NOMBRE_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    expires: Number.isNaN(vence.getTime()) ? undefined : vence,
-    path: "/",
-  });
+function firmar(cuerpo: string): string {
+  return createHmac("sha256", exigirSecreto()).update(cuerpo).digest("base64url");
 }
 
-/** Idem: solo desde server action o route handler. */
+function armarValor(contenido: Contenido): string {
+  const cuerpo = Buffer.from(JSON.stringify(contenido)).toString("base64url");
+  return `${cuerpo}.${firmar(cuerpo)}`;
+}
+
+/** Devuelve el contenido solo si la firma cierra y no venció. */
+function abrirValor(valor: string): Contenido | null {
+  const corte = valor.lastIndexOf(".");
+  if (corte < 1) return null;
+
+  const cuerpo = valor.slice(0, corte);
+  const firmaRecibida = Buffer.from(valor.slice(corte + 1), "base64url");
+  const firmaEsperada = Buffer.from(firmar(cuerpo), "base64url");
+
+  // Longitudes distintas hacen explotar timingSafeEqual, así que se chequean antes.
+  if (firmaRecibida.length !== firmaEsperada.length) return null;
+  if (!timingSafeEqual(firmaRecibida, firmaEsperada)) return null;
+
+  let contenido: Contenido;
+  try {
+    contenido = JSON.parse(Buffer.from(cuerpo, "base64url").toString());
+  } catch {
+    return null;
+  }
+
+  if (!Number.isInteger(contenido.uid) || !Number.isFinite(contenido.exp)) return null;
+  if (contenido.exp * 1000 <= Date.now()) return null;
+
+  return contenido;
+}
+
+/**
+ * La cookie ya armada y firmada, sin escribirla.
+ *
+ * Se expone así porque un route handler que devuelve su propio `NextResponse`
+ * tiene que setearla sobre esa respuesta (`respuesta.cookies.set(...)`); las
+ * escrituras vía `cookies()` no siempre viajan en un redirect propio.
+ *
+ * `expSegundos` sirve para reescribirla sin correr el vencimiento: al cambiar
+ * de proyecto se conserva el de la sesión original, así ir y volver entre
+ * proyectos no la estira para siempre.
+ */
+export function cookieDeSesion(uid: number, pid: number | null, expSegundos?: number) {
+  const vence = expSegundos
+    ? new Date(expSegundos * 1000)
+    : new Date(Date.now() + HORAS_DE_VIDA * 60 * 60 * 1000);
+
+  return {
+    nombre: NOMBRE_COOKIE,
+    valor: armarValor({ uid, pid, exp: Math.floor(vence.getTime() / 1000) }),
+    opciones: {
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure: process.env.NODE_ENV === "production",
+      expires: vence,
+      path: "/",
+    },
+  };
+}
+
+/** Solo desde un server action: Next no deja escribir cookies en un page. */
+export function guardarCookieSesion(uid: number, pid: number | null, expSegundos?: number): void {
+  const { nombre, valor, opciones } = cookieDeSesion(uid, pid, expSegundos);
+  cookies().set(nombre, valor, opciones);
+}
+
+/** Idem: solo desde server action. */
 export function borrarCookieSesion(): void {
   cookies().delete(NOMBRE_COOKIE);
 }
 
-/**
- * Resuelve la sesion actual contra el registro.
- * Devuelve null si no hay cookie o si el token ya no sirve (vencido, revocado,
- * usuario dado de baja). No borra la cookie: desde un server component no se
- * puede. De eso se encarga `requerirSesion` mandando a /api/salir.
- */
-export async function obtenerSesion(): Promise<RespuestaSesion | null> {
-  const token = leerToken();
-  if (!token) return null;
-
-  try {
-    return await pedirSesion(token);
-  } catch (error) {
-    if (esSesionMuerta(error)) return null;
-    throw error;
-  }
+/** El contenido crudo de la cookie, sin ir al padrón. */
+export function leerCookieSesion(): Contenido | null {
+  const valor = cookies().get(NOMBRE_COOKIE)?.value;
+  return valor ? abrirValor(valor) : null;
 }
 
 /**
- * Para páginas protegidas: devuelve la sesion o corta el render con un
- * redirect. Si habia cookie pero ya no sirve, pasa por /api/salir para
- * limpiarla antes de llegar a /login.
+ * Resuelve la sesión actual contra el padrón.
+ *
+ * Devuelve null si no hay cookie, si la firma no cierra, si venció o si esa
+ * persona ya no está en el padrón. El proyecto se vuelve a chequear contra sus
+ * proyectos actuales: si la sacaron del que tenía elegido, queda `proyecto:
+ * null` y el flujo la manda de vuelta al selector.
  */
-export async function requerirSesion(): Promise<RespuestaSesion> {
-  const token = leerToken();
-  if (!token) redirect("/login");
+export async function obtenerSesion(): Promise<Sesion | null> {
+  const contenido = leerCookieSesion();
+  if (!contenido) return null;
 
-  const sesionActual = await obtenerSesion();
-  if (!sesionActual) redirect("/api/salir?motivo=expirada");
+  const usuario = await buscarPorId(contenido.uid);
+  if (!usuario) return null;
 
-  return sesionActual;
+  return {
+    usuario,
+    proyecto: usuario.proyectos.find((proyecto) => proyecto.id === contenido.pid) ?? null,
+    vence: new Date(contenido.exp * 1000),
+  };
+}
+
+/**
+ * Para páginas protegidas: devuelve la sesión con proyecto elegido, o corta el
+ * render con un redirect. Sin cookie válida va a /login; con cookie pero sin
+ * proyecto vigente, al selector.
+ */
+export async function requerirSesion(): Promise<Sesion & { proyecto: Proyecto }> {
+  const sesion = await obtenerSesion();
+  if (!sesion) redirect("/api/salir?motivo=expirada");
+  if (!sesion.proyecto) redirect("/elegir-proyecto");
+
+  return { ...sesion, proyecto: sesion.proyecto };
 }

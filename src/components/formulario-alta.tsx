@@ -7,32 +7,29 @@ import { accionAlta } from "@/app/crear-cuenta/acciones";
 import { BotonEnviar } from "@/components/boton-enviar";
 import { Campo } from "@/components/campo";
 import { ESTADO_INICIAL } from "@/lib/formularios";
+import type { Proyecto } from "@/lib/padron";
 import { PASSWORD_MIN } from "@/lib/validaciones";
 
-export function FormularioAlta({ emailInicial = "" }: { emailInicial?: string }) {
+type Props = {
+  proyectos: Proyecto[];
+  emailInicial?: string;
+};
+
+export function FormularioAlta({ proyectos, emailInicial = "" }: Props) {
   const [estado, accion] = useFormState(accionAlta, ESTADO_INICIAL);
   const valores = estado.valores ?? {};
   const email = valores.email ?? emailInicial;
 
-  // El caso importante del alta: la persona ya existe en el padrón de PP2 por
-  // otro proyecto. No hay que crearle nada nuevo, hay que pedirle LA contraseña
-  // que ya tenía y reenviar el mismo formulario: eso la vincula a este proyecto.
-  const yaEstaEnPP2 = estado.codigo === "EMAIL_EN_USO";
-  const yaEstaEnEsteProyecto = estado.codigo === "USUARIO_YA_REGISTRADO";
+  // El padrón reusa la persona por email: si ya existe, el alta no crea una
+  // cuenta nueva, solo la agrega al proyecto elegido.
+  const yaEstaEnEseProyecto = estado.codigo === "YA_REGISTRADO_EN_PROYECTO";
 
   return (
     <form action={accion} noValidate>
-      {yaEstaEnPP2 ? (
-        <p className="alerta aviso" role="alert">
-          <strong>Ya tenés cuenta en PP2 con ese email.</strong> No hace falta crear otra:
-          escribí abajo la contraseña de esa cuenta y te sumamos a este proyecto.
-        </p>
-      ) : null}
-
-      {estado.mensaje && !yaEstaEnPP2 ? (
+      {estado.mensaje ? (
         <p className="alerta error" role="alert">
           {estado.mensaje}
-          {yaEstaEnEsteProyecto ? (
+          {yaEstaEnEseProyecto ? (
             <>
               {" "}
               <Link href={`/login?email=${encodeURIComponent(email)}`}>Iniciar sesión</Link>.
@@ -69,31 +66,44 @@ export function FormularioAlta({ emailInicial = "" }: { emailInicial?: string })
       />
 
       <Campo
-        nombre="telefono"
-        etiqueta="Teléfono (opcional)"
-        tipo="tel"
-        autoComplete="tel"
-        requerido={false}
-        valorInicial={valores.telefono}
-        error={estado.campos?.telefono}
-      />
-
-      <Campo
         nombre="password"
-        etiqueta={yaEstaEnPP2 ? "Tu contraseña de PP2" : "Contraseña"}
+        etiqueta="Contraseña"
         tipo="password"
-        autoComplete={yaEstaEnPP2 ? "current-password" : "new-password"}
-        pista={
-          yaEstaEnPP2
-            ? "La que usás en el otro proyecto de la materia."
-            : `Mínimo ${PASSWORD_MIN} caracteres.`
-        }
+        autoComplete="new-password"
+        pista={`Mínimo ${PASSWORD_MIN} caracteres. Si ya tenés cuenta en PP2, poné esa misma.`}
         error={estado.campos?.password}
       />
 
-      <BotonEnviar enviando="Creando...">
-        {yaEstaEnPP2 ? "Usar mi cuenta de PP2" : "Crear cuenta"}
-      </BotonEnviar>
+      <div className="campo">
+        <label htmlFor="proyecto_id">Proyecto</label>
+        <select
+          id="proyecto_id"
+          name="proyecto_id"
+          defaultValue={valores.proyecto_id ?? ""}
+          required
+          aria-invalid={estado.campos?.proyecto_id ? "true" : undefined}
+          aria-describedby={estado.campos?.proyecto_id ? "proyecto_id-error" : "proyecto_id-pista"}
+        >
+          <option value="" disabled>
+            Elegí un proyecto
+          </option>
+          {proyectos.map((proyecto) => (
+            <option key={proyecto.id} value={proyecto.id}>
+              {proyecto.nombre}
+            </option>
+          ))}
+        </select>
+        <span className="pista" id="proyecto_id-pista">
+          Después te pueden sumar a otros; con la misma cuenta entrás a todos.
+        </span>
+        {estado.campos?.proyecto_id ? (
+          <span className="error-campo" id="proyecto_id-error">
+            {estado.campos.proyecto_id}
+          </span>
+        ) : null}
+      </div>
+
+      <BotonEnviar enviando="Creando...">Crear cuenta</BotonEnviar>
     </form>
   );
 }
