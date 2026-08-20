@@ -301,6 +301,12 @@ async function verificarContraElPadron(email: string, password: string): Promise
 export async function registrar(datos: DatosAlta): Promise<{ usuarioId: number }> {
   const { estado, cuerpo } = await pedir("/registrar", { metodo: "POST", cuerpo: datos });
 
+  // El email ya existe en el padrón y la contraseña que mandó no es la de esa
+  // cuenta. No es "no se pudo crear": es "esa cuenta no es tuya".
+  if (estado === 401 || estado === 403) {
+    throw new ErrorPadron("CREDENCIALES_INVALIDAS", "Email o contraseña incorrectos");
+  }
+
   if (estado === 422) {
     throw new ErrorPadron("DATOS_INVALIDOS", "Datos inválidos", camposDeFastapi(cuerpo));
   }
@@ -392,27 +398,26 @@ function proyectosDelEntorno(): Proyecto[] | null {
 }
 
 /**
- * Proyectos a los que alguien se puede sumar, con el nombre que tenga en el
- * padrón cuando ya haya gente adentro.
+ * Proyectos a los que alguien se puede sumar.
+ *
+ * Sale de `GET /proyectos`, que no lleva token porque el formulario de alta lo
+ * necesita antes de que la persona tenga cuenta. Si el padrón no responde se
+ * usan los de la semilla: es preferible pintar el formulario y que el alta
+ * falle después con su mensaje, a mostrar una lista vacía.
  */
 export async function listarProyectos(): Promise<Proyecto[]> {
-  const porId = new Map<number, Proyecto>();
-
-  for (const proyecto of proyectosDelEntorno() ?? PROYECTOS_SEMILLA) {
-    porId.set(proyecto.id, proyecto);
-  }
-
   try {
-    for (const usuario of await listarUsuarios()) {
-      for (const proyecto of usuario.proyectos) {
-        porId.set(proyecto.id, proyecto);
-      }
+    const { estado, cuerpo } = await pedir("/proyectos");
+
+    if (estado < 400 && Array.isArray(cuerpo)) {
+      const proyectos = normalizarProyectos(cuerpo);
+      if (proyectos.length > 0) return proyectos;
     }
+
+    console.error(`[padron] GET /proyectos devolvió HTTP ${estado}`, cuerpo);
   } catch (error) {
-    // Sin padrón igual se puede pintar el formulario: el alta va a fallar
-    // después, con su mensaje, y no antes con una lista vacía.
-    console.error("[padron] no se pudieron leer los proyectos en uso", error);
+    console.error("[padron] no se pudo leer GET /proyectos", error);
   }
 
-  return Array.from(porId.values()).sort((a, b) => a.id - b.id);
+  return proyectosDelEntorno() ?? PROYECTOS_SEMILLA;
 }

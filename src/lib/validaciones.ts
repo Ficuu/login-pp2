@@ -1,11 +1,15 @@
 /**
  * Validaciones que se corren en el servidor antes de viajar al padrón (y en el
- * cliente, para no hacer el viaje al pedo). Los máximos salen de las columnas
- * de `database/init.sql`: email VARCHAR(100), password VARCHAR(255).
+ * cliente, para no hacer el viaje al pedo).
+ *
+ * El máximo de la contraseña es de bcrypt, que no mira más allá de 72 BYTES.
+ * Ojo con confundirlo con el VARCHAR(255) de la columna: ahí entra el hash (60
+ * caracteres), no la contraseña. Los otros máximos sí salen de las columnas de
+ * `database/init.sql`: email VARCHAR(100), nombre y apellido VARCHAR(50).
  */
 
 export const PASSWORD_MIN = 8;
-export const PASSWORD_MAX = 255;
+export const PASSWORD_MAX_BYTES = 72;
 export const EMAIL_MAX = 100;
 export const NOMBRE_MAX = 50;
 
@@ -22,10 +26,14 @@ export function errorDeEmail(email: string): string | undefined {
   return undefined;
 }
 
+export function bytesDe(texto: string): number {
+  return new TextEncoder().encode(texto).length;
+}
+
 export function errorDePassword(password: string): string | undefined {
   if (!password) return "Ingresá tu contraseña.";
   if (password.length < PASSWORD_MIN) return `La contraseña necesita al menos ${PASSWORD_MIN} caracteres.`;
-  if (password.length > PASSWORD_MAX) return `La contraseña no puede pasar de ${PASSWORD_MAX} caracteres.`;
+  if (bytesDe(password) > PASSWORD_MAX_BYTES) return "La contraseña es demasiado larga (máximo 72 bytes).";
   return undefined;
 }
 
