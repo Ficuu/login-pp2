@@ -421,3 +421,76 @@ export async function listarProyectos(): Promise<Proyecto[]> {
 
   return proyectosDelEntorno() ?? PROYECTOS_SEMILLA;
 }
+
+/**
+ * Lo que hace falta para mandar a alguien a la plataforma de su proyecto.
+ *
+ * `volverA` sale de `proyectos.url` en el padrón, no de acá: si el destino lo
+ * eligiera quien pide el código, cualquiera se mandaría el código de otra
+ * persona a un sitio propio.
+ */
+export type Lanzamiento = {
+  codigo: string;
+  volverA: string;
+};
+
+/**
+ * Pide al padrón un código de un solo uso para entrar a un proyecto.
+ *
+ * Solo lo puede pedir el login central (es su token el que va en PADRON_TOKEN),
+ * y solo después de haber validado la contraseña: emitir un código es afirmar
+ * que esta persona ya probó quién es.
+ *
+ * Devuelve `null` cuando ese proyecto todavía no tiene a dónde mandar a nadie
+ * (el padrón responde 409). No es un error: hay proyectos de la materia que
+ * todavía no tienen plataforma, y para esos la persona se queda en este front.
+ */
+export async function pedirCodigo(
+  usuarioId: number,
+  proyectoId: number,
+): Promise<Lanzamiento | null> {
+  const { estado, cuerpo } = await pedir("/codigos", {
+    metodo: "POST",
+    cuerpo: { usuario_id: usuarioId, proyecto_id: proyectoId },
+  });
+
+  // 409: el proyecto no tiene URL. 404/405: padrón viejo, sin este endpoint.
+  if (estado === 409 || estado === 404 || estado === 405) return null;
+
+  if (estado >= 400) {
+    // Se avisa y se sigue: es preferible que la persona quede adentro del login
+    // a que no pueda entrar a ningún lado porque falló el salto.
+    console.error(`[padron] POST /codigos devolvió HTTP ${estado}`, cuerpo);
+    return null;
+  }
+
+  const codigo = (cuerpo as { codigo?: unknown } | null)?.codigo;
+  const volverA = (cuerpo as { volver_a?: unknown } | null)?.volver_a;
+
+  if (typeof codigo !== "string" || typeof volverA !== "string") {
+    console.error("[padron] POST /codigos devolvió una respuesta incompleta", cuerpo);
+    return null;
+  }
+
+  return { codigo, volverA };
+}
+
+/**
+ * A dónde mandar a la persona cuando entra a un proyecto.
+ *
+ * La plataforma del proyecto, con el código en la query, si el proyecto tiene
+ * una. Si no, `/cuenta`, que es la pantalla de este front.
+ */
+export async function destinoDelProyecto(
+  usuarioId: number,
+  proyectoId: number,
+  siNoHayProyecto = "/cuenta",
+): Promise<string> {
+  const lanzamiento = await pedirCodigo(usuarioId, proyectoId);
+  if (!lanzamiento) return siNoHayProyecto;
+
+  const destino = new URL(lanzamiento.volverA);
+  destino.searchParams.set("codigo", lanzamiento.codigo);
+
+  return destino.toString();
+}

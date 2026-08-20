@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
-import { login, registrar } from "@/lib/padron";
+import { destinoDelProyecto, login, registrar } from "@/lib/padron";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
@@ -67,9 +67,16 @@ export async function accionAlta(
     redirect(`/login?motivo=alta-ok&email=${encodeURIComponent(email)}`);
   }
 
-  // Entra derecho al proyecto que acaba de elegir en el alta.
+  // Entra derecho al proyecto que acaba de elegir en el alta: a su plataforma
+  // si tiene una, y si no a la pantalla de este front, con la bienvenida.
   const yaEstaba = usuario.proyectos.length > 1;
   guardarCookieSesion(usuario.id, Number(proyecto));
 
-  redirect(yaEstaba ? "/cuenta?bienvenida=vinculado" : "/cuenta?bienvenida=nuevo");
+  const destino = await destinoDelProyecto(
+    usuario.id,
+    Number(proyecto),
+    yaEstaba ? "/cuenta?bienvenida=vinculado" : "/cuenta?bienvenida=nuevo",
+  );
+
+  redirect(destino);
 }

@@ -32,6 +32,9 @@ POST /login (email + password)
         └── N proyectos -> /elegir-proyecto
 ```
 
+Y elegido el proyecto, se sale hacia su plataforma con un código de un solo uso: ver
+[Entrar es salir hacia el proyecto](#entrar-es-salir-hacia-el-proyecto).
+
 El proyecto elegido queda en la cookie de sesión. Cambiarlo (`/elegir-proyecto`,
 enlazado desde `/cuenta`) **no vuelve a pedir la contraseña**: la identidad ya está
 probada y firmada, lo único que cambia es el alcance. Sí se verifica contra el
@@ -76,6 +79,7 @@ POST /login        valida credenciales -> usuario + TODOS sus proyectos
 POST /registrar    alta, o vinculación a otro proyecto (pide la contraseña)
 GET  /usuarios     padrón completo          [Authorization: Bearer]
 GET  /proyectos    proyectos disponibles    [sin token, lo usa el alta]
+POST /codigos      código de un solo uso para entrar a un proyecto
 ```
 
 ```text
@@ -92,6 +96,40 @@ un segundo pedido.
 Las contraseñas viven hasheadas allá (bcrypt) y la comparación pasa entera del lado del
 padrón: **este front no sabe ni tiene que saber qué algoritmo se usa**, y nunca guarda
 una contraseña.
+
+### Entrar es salir hacia el proyecto
+
+Este front es el login **central**: valida la identidad y después manda a la persona a
+la plataforma de su proyecto. Elegir proyecto en `/elegir-proyecto` (o tener uno solo,
+que se resuelve igual) termina en un salto, no en una pantalla de acá:
+
+```
+elige Carpooling
+   │
+   ▼
+POST /codigos {usuario_id, proyecto_id}   [con PADRON_TOKEN]
+   │
+   ▼
+{ "codigo": "NCicTX...", "volver_a": "https://carpooling.../sesion" }
+   │
+   ▼
+303 -> https://carpooling.../sesion?codigo=NCicTX...
+       y ahí Carpooling lo canjea con SU token y emite su sesión
+```
+
+`volver_a` sale de `proyectos.url` en el padrón, no de acá y menos de la query: si el
+destino se pudiera elegir desde afuera, esto sería un redirect abierto y alcanzaría para
+mandarle el código de otra persona a un sitio propio.
+
+La cookie de sesión de este front **se guarda igual** antes del salto: la persona sigue
+con sesión acá, así vuelve a `/elegir-proyecto` y se cambia de proyecto sin escribir de
+nuevo la contraseña.
+
+**Si el proyecto todavía no tiene plataforma**, el padrón responde 409 y no hay salto:
+la persona se queda en `/cuenta`, como antes. Los proyectos de la materia se van
+sumando de a uno, y los que no están todavía no rompen nada. Lo mismo si `POST /codigos`
+falla por cualquier otro motivo: se avisa en el log del servidor y se sigue de largo,
+porque es mejor dejarla adentro del login que no dejarla entrar a ningún lado.
 
 ### El respaldo, si le pegás a un padrón viejo
 
@@ -169,7 +207,7 @@ src/
     errores.ts        código de error -> mensaje en pantalla
     validaciones.ts   email, contraseña y proyecto, con los límites de las columnas
     formularios.ts    estado compartido entre server actions y formularios
-    redirecciones.ts  redirect con Location relativo (funciona detrás del puerto de docker)
+    redirecciones.ts  redirect que funciona detrás del puerto de docker y para salir al proyecto
   app/
     login/            página + server action
     elegir-proyecto/  selector + `entrar/` (sella el proyecto cuando hay uno solo)

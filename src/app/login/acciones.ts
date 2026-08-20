@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
-import { login } from "@/lib/padron";
+import { destinoDelProyecto, login } from "@/lib/padron";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
@@ -55,6 +55,9 @@ export async function accionLogin(
   const unico = usuario.proyectos.length === 1 ? usuario.proyectos[0].id : null;
   guardarCookieSesion(usuario.id, unico);
 
+  // Y "entrar" es la plataforma de ese proyecto, si tiene una.
+  const destino = unico ? await destinoDelProyecto(usuario.id, unico) : "/elegir-proyecto";
+
   // Fuera del try: redirect() corta el flujo lanzando, no es un error.
-  redirect(unico ? "/cuenta" : "/elegir-proyecto");
+  redirect(destino);
 }

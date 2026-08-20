@@ -3,15 +3,18 @@
 import { redirect } from "next/navigation";
 
 import type { EstadoFormulario } from "@/lib/formularios";
-import { buscarPorId } from "@/lib/padron";
+import { buscarPorId, destinoDelProyecto } from "@/lib/padron";
 import { guardarCookieSesion, leerCookieSesion } from "@/lib/sesion";
 
 /**
- * Cambia el proyecto de la sesión en curso.
+ * Elegir proyecto es entrar a ese proyecto.
  *
  * No pide la contraseña de nuevo: la identidad ya está probada y sigue firmada
  * en la cookie. Lo único que se valida es que el proyecto pedido esté entre los
  * suyos en el padrón, para que nadie se cambie a uno que no le toca.
+ *
+ * Si ese proyecto tiene plataforma propia, de acá se sale hacia allá con un
+ * código de un solo uso; si no, se queda en este front.
  */
 export async function accionElegirProyecto(
   _estado: EstadoFormulario,
@@ -32,7 +35,13 @@ export async function accionElegirProyecto(
     return { mensaje: "No estás registrado en ese proyecto." };
   }
 
-  // Con el exp de la cookie vieja: elegir proyecto no renueva la sesión.
+  // Con el exp de la cookie vieja: elegir proyecto no renueva la sesión. La
+  // cookie se guarda igual aunque el salto lleve a otra plataforma: la persona
+  // sigue con sesión acá, para volver y cambiar de proyecto sin la contraseña.
   guardarCookieSesion(usuario.id, proyectoId, sesion.exp);
-  redirect("/cuenta");
+
+  const destino = await destinoDelProyecto(usuario.id, proyectoId);
+
+  // Fuera de cualquier try: redirect() corta el flujo lanzando.
+  redirect(destino);
 }
