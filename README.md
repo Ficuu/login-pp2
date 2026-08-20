@@ -1,271 +1,325 @@
-# Login PP2
+# Padrón PP2
 
-Front de inicio de sesión contra el **Sistema de Registración de PP2**
-([DennisMejia21/SistemaRegistracion](https://github.com/DennisMejia21/SistemaRegistracion),
-rama `servicio-registracion`), el padrón de usuarios común a todos los proyectos
-de la materia.
+API del padrón de la materia: acá viven las personas, sus contraseñas y la
+tabla que dice a qué proyectos pertenece cada una. Los fronts de los
+proyectos de Prácticas Profesionalizantes (Carpooling, Alquiler de Quintas,
+Sistema de Reservas) no guardan contraseñas — le preguntan a este servicio.
 
-Este repo **no tiene base de datos**: las personas, sus contraseñas y la tabla
-`usuario_proyecto` viven en el padrón. Acá está el front y su backend propio.
+**Es solo una API.** No sirve páginas ni tiene interfaz: es un servicio REST,
+pensado para que cada proyecto lo consuma desde su propio backend.
 
-## Qué hace
+### Tecnologías
 
-- `/login` — email + contraseña.
-- `/elegir-proyecto` — para quien está en más de un proyecto.
-- `/crear-cuenta` — alta en el padrón, ya vinculada a un proyecto.
-- `/cuenta` — página protegida: sus datos, sus proyectos y con cuál está trabajando.
+* TypeScript
+* Express
+* Prisma
+* MySQL
+* Docker
 
-## Una persona, varios proyectos
+### Funcionalidades
 
-En el padrón `usuarios.email` es UNIQUE y `usuario_proyecto` es N:M: **la identidad
-es una sola y el proyecto es un vínculo**. Por eso la contraseña se valida una vez
-y el proyecto se resuelve después:
+* Registrar usuarios.
+* Asociar usuarios a proyectos.
+* Evitar registros duplicados en un mismo proyecto.
+* Validar credenciales (login).
+* Resetear la contraseña de alguien que la perdió.
+* Mandar a cada persona a la plataforma de su proyecto, con un código de un
+  solo uso, sin que esa plataforma vea nunca su contraseña.
+* Consultar usuarios y los proyectos en los que están registrados.
 
-```
-POST /login (email + password)
-        │
-        ▼
-  identidad OK -> el padrón devuelve sus proyectos
-        │
-        ├── 0 proyectos -> no entra, se le explica por qué
-        ├── 1 proyecto  -> se sella solo, nunca ve el selector
-        └── N proyectos -> /elegir-proyecto
-```
-
-Y elegido el proyecto, se sale hacia su plataforma con un código de un solo uso: ver
-[Entrar es salir hacia el proyecto](#entrar-es-salir-hacia-el-proyecto).
-
-El proyecto elegido queda en la cookie de sesión. Cambiarlo (`/elegir-proyecto`,
-enlazado desde `/cuenta`) **no vuelve a pedir la contraseña**: la identidad ya está
-probada y firmada, lo único que cambia es el alcance. Sí se verifica contra el
-padrón que el proyecto pedido esté entre los suyos, y el vencimiento original se
-conserva para que ir y volver no estire la sesión.
-
-Si a alguien lo sacan del proyecto que tenía elegido, la próxima navegación lo
-manda de vuelta al selector: los proyectos se releen del padrón en cada request,
-no se confía en lo que diga la cookie.
-
-## La sesión la emitimos nosotros
-
-El padrón no entrega tokens ni tiene un `GET /sesion` contra el cual validar. Así
-que después del login firmamos una cookie **httpOnly** (`sesion_pp2`) con
-HMAC-SHA256 y `SESION_SECRETO`.
-
-Adentro va lo mínimo — `uid`, `pid` y vencimiento — y **nada más**: el nombre, el
-email y los proyectos salen del padrón en cada request, porque pueden haber
-cambiado. Una cookie con la firma rota, vencida, o de alguien que ya no está en el
-padrón se descarta y vuelve a `/login`.
-
-## Por qué hay backend
-
-El `PADRON_TOKEN` identifica al proyecto entero, no a la persona: quien lo tenga
-lee el padrón completo. Por eso nunca puede estar en el navegador (nada de
-`NEXT_PUBLIC_`, nada de `fetch` al padrón desde un componente cliente).
-
-```
-navegador ──(form, cookie httpOnly)──▶ backend del front ──(Bearer)──▶ padrón
-                                       (server actions y
-                                        route handlers)
-```
-
-## El contrato con el padrón
-
-El padrón expone lo que este front necesita (rama `claude/login-multiple-projects-5496rr`
-del [Sistema de Registración](https://github.com/DennisMejia21/SistemaRegistracion)):
+### Endpoints
 
 ```text
-GET  /             estado del servicio
-POST /login        valida credenciales -> usuario + TODOS sus proyectos
-POST /registrar    alta, o vinculación a otro proyecto (pide la contraseña)
-GET  /usuarios     padrón completo          [Authorization: Bearer]
-GET  /proyectos    proyectos disponibles    [sin token, lo usa el alta]
-POST /codigos      código de un solo uso para entrar a un proyecto
+GET  /                     estado del servicio
+POST /login                valida credenciales -> usuario + sus proyectos
+POST /registrar            alta (o vinculación a otro proyecto)
+GET  /usuarios             los usuarios de quien pregunta   [token de app]
+GET  /proyectos            proyectos disponibles
+POST /password/reset       emite un token de reset          [token de la cátedra]
+POST /password             canjea el token por una contraseña nueva
+POST /aplicaciones         da de alta una app y su token     [token de la cátedra]
+GET  /aplicaciones         qué apps hay y qué ve cada una    [token de la cátedra]
+DELETE /aplicaciones/{id}  revoca el token de una app        [token de la cátedra]
+PUT  /proyectos/{id}/url   dónde vive ese proyecto           [token de la cátedra]
+POST /codigos              emite un código de ingreso        [token del login central]
+POST /codigos/canjear      código -> quién es la persona     [token del proyecto]
 ```
 
-```text
-POST /login   { "email": "lopez@gmail.com", "password": "..." }
+#### `POST /login`
 
-200 { "id": 4, "nombre": "Fabian", "apellido": "Lopez", "email": "lopez@gmail.com",
-      "proyectos": [ { "id": 1, "nombre": "Carpooling" }, ... ] }
-401 { "detail": "Credenciales invalidas" }
+```json
+{ "email": "lopez@gmail.com", "password": "Secreta123" }
 ```
 
-Que `proyectos` venga en la misma respuesta es lo que permite resolver el selector sin
-un segundo pedido.
+Devuelve la persona con **todos** sus proyectos:
 
-Las contraseñas viven hasheadas allá (bcrypt) y la comparación pasa entera del lado del
-padrón: **este front no sabe ni tiene que saber qué algoritmo se usa**, y nunca guarda
-una contraseña.
-
-### `/entrar`: llegar desde un proyecto
-
-El circuito normal no arranca acá: arranca en la plataforma del proyecto. Carpooling
-tiene un botón "Ingresar" que manda a:
-
-```text
-https://login.pp2/entrar?proyecto_id=1&state=algoAlAzar
+```json
+{
+  "id": 4,
+  "nombre": "Fabian",
+  "apellido": "Lopez",
+  "email": "lopez@gmail.com",
+  "proyectos": [
+    { "id": 1, "nombre": "Carpooling" },
+    { "id": 2, "nombre": "Alquiler de Quintas" }
+  ]
+}
 ```
 
-Y ahí pasa una de tres:
+Los proyectos van en la misma respuesta a propósito: con eso quien consume la
+API decide si no la deja entrar (cero proyectos), si entra derecho (uno) o si
+le muestra un selector (varios), sin un segundo pedido.
 
-| Situación | Qué hace |
-|---|---|
-| Ya tiene sesión acá y está en ese proyecto | Vuelve al toque, sin que le pregunten nada |
-| No tiene sesión | Se guarda a dónde volver y va a `/login`; el login lo consume apenas la contraseña cierra |
-| Tiene cuenta pero no está en ese proyecto | Va al selector, con un aviso, a elegir uno de los suyos |
+Si el email no existe o la contraseña no es la de esa cuenta responde **401**
+con `{"detail": "Credenciales invalidas"}` — el mismo error en los dos casos,
+para que no se pueda averiguar quién tiene cuenta y quién no.
 
-El primer caso es el que hace que entrar al **segundo** proyecto de la materia no vuelva
-a pedir la contraseña: la identidad ya está probada, cambia el alcance nada más.
+#### `POST /registrar`
 
-El `proyecto_id` y el `state` quedan en una cookie firmada aparte (`ingreso_pp2`, 15
-minutos, `src/lib/ingreso.ts`), porque entre que llega y que se identifica hay un login
-de por medio. Va firmada por lo mismo que la de sesión: si se pudiera editar, alguien
-cambiaría el `pid` para salir hacia un proyecto que no le toca. Igual no alcanzaría —
-antes de emitir el código se verifica contra el padrón que esté en ese proyecto—, pero
-son dos puertas y no una.
-
-El `state` es del proyecto: viaja de ida y vuelve tal cual en la query, y acá no se mira
-ni se usa. Le sirve a él para reconocer su propia ida.
-
-Si la persona todavía no tiene cuenta y se va a `/crear-cuenta`, el proyecto del que
-vino **ya viene elegido** en el formulario: es a donde quería entrar, y elegir otro la
-dejaría afuera. Terminada el alta, vuelve ahí.
-
-### Entrar es salir hacia el proyecto
-
-Este front es el login **central**: valida la identidad y después manda a la persona a
-la plataforma de su proyecto. Elegir proyecto en `/elegir-proyecto` (o tener uno solo,
-que se resuelve igual) termina en un salto, no en una pantalla de acá:
-
-```
-elige Carpooling
-   │
-   ▼
-POST /codigos {usuario_id, proyecto_id}   [con PADRON_TOKEN]
-   │
-   ▼
-{ "codigo": "NCicTX...", "volver_a": "https://carpooling.../sesion" }
-   │
-   ▼
-303 -> https://carpooling.../sesion?codigo=NCicTX...
-       y ahí Carpooling lo canjea con SU token y emite su sesión
+```json
+{ "nombre": "Ema", "apellido": "Ortiz", "email": "ortiz@gmail.com",
+  "password": "Secreta123", "proyecto_id": 3 }
 ```
 
-`volver_a` sale de `proyectos.url` en el padrón, no de acá y menos de la query: si el
-destino se pudiera elegir desde afuera, esto sería un redirect abierto y alcanzaría para
-mandarle el código de otra persona a un sitio propio.
+Si el email **no existe**, crea la persona y la vincula al proyecto.
 
-La cookie de sesión de este front **se guarda igual** antes del salto: la persona sigue
-con sesión acá, así vuelve a `/elegir-proyecto` y se cambia de proyecto sin escribir de
-nuevo la contraseña.
+Si el email **ya existe**, no crea nada nuevo: verifica que la contraseña sea
+la de esa cuenta y agrega el vínculo con el proyecto nuevo. Si la contraseña
+no coincide responde 401 y no toca nada. Así es como alguien que ya está en
+la materia se suma a un segundo proyecto sin tener otra cuenta.
 
-**Si el proyecto todavía no tiene plataforma**, el padrón responde 409 y no hay salto:
-la persona se queda en `/cuenta`, como antes. Los proyectos de la materia se van
-sumando de a uno, y los que no están todavía no rompen nada. Lo mismo si `POST /codigos`
-falla por cualquier otro motivo: se avisa en el log del servidor y se sigue de largo,
-porque es mejor dejarla adentro del login que no dejarla entrar a ningún lado.
+Si ya estaba en ese mismo proyecto responde 200 con `{"ok": false}`. Todo el
+endpoint corre en una única transacción: si el vínculo con el proyecto
+falla, el alta del usuario también se deshace.
 
-### El respaldo, si le pegás a un padrón viejo
+#### `GET /usuarios`
 
-Si `POST /login` devuelve 404, el cliente cae a comparar contra el `password` que venga
-en `GET /usuarios`. **Es un respaldo, no el diseño**: manda la tabla de contraseñas
-entera por la red en cada login, y deja de funcionar en cuanto estén hasheadas (el
-cliente lo detecta y lo dice en el log). Sirve para no quedar bloqueado, nada más.
-
-Lo mismo con `GET /proyectos`: si no contesta, el alta usa los proyectos de la semilla
-de `database/init.sql`, pisables con la variable `PROYECTOS`.
-
-## Levantarlo
-
-Todo con docker: son dos stacks, primero el padrón (que crea la red) y después este.
-
-### 1. El padrón
+Devuelve **los usuarios que le corresponden a la aplicación que pregunta**,
+según su token:
 
 ```bash
-git clone -b servicio-registracion https://github.com/DennisMejia21/SistemaRegistracion
-cd SistemaRegistracion
-cp .env.example .env           # completá DB_PASSWORD, MYSQL_ROOT_PASSWORD y API_TOKEN
-docker compose up -d --build   # API en :8000, phpMyAdmin en :8081
+curl -H "Authorization: Bearer $TOKEN_DE_LA_APP" http://localhost:8000/usuarios
 ```
 
-### 2. Este repo
+Si el token es el de un proyecto, salen solo los inscriptos en **ese**
+proyecto, y de cada uno solo ese proyecto: que alguien esté además en
+Carpooling no es asunto de Alquiler de Quintas. El único que ve el padrón
+entero es el login central, que lo necesita para ofrecer "elegí tu proyecto"
+antes de saber a cuál va la persona.
+
+Sin el header, con un token que no es, o con uno revocado, responde 401.
+**Nunca devuelve `password`**: para validar credenciales está `POST /login`.
+
+### Un token por aplicación
+
+Cada aplicación que le pega a esta API tiene el suyo, en la tabla
+`aplicaciones`. Antes había uno solo para todos, y con él cualquier front se
+llevaba el padrón entero, incluida la gente de los otros proyectos. Ahora la
+API sabe **quién** pregunta.
+
+Las da de alta la cátedra, con su `ADMIN_TOKEN`:
 
 ```bash
-cp .env.example .env           # PADRON_TOKEN = el API_TOKEN de arriba, y un SESION_SECRETO
+curl -X POST localhost:8000/aplicaciones \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"nombre":"Carpooling","proyecto_id":1}'
+```
+
+```json
+{ "id": 2, "nombre": "Carpooling", "proyecto_id": 1,
+  "token": "d-Bz-m38gy7YhvWs4BP-MvwDfzmQrWMOS5tQwnyyBkM",
+  "aviso": "Guardalo ahora: no se vuelve a mostrar" }
+```
+
+Ese token es el que usa el backend de ese proyecto. **Se ve una sola vez**:
+en la base queda solo su hash, así que un dump no le sirve a nadie para
+entrar. Si se pierde, se revoca esa y se crea otra.
+
+Para ver qué hay y cortar una:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" localhost:8000/aplicaciones
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" localhost:8000/aplicaciones/2
+```
+
+Revocar no borra la fila: queda el registro de que existió y cuándo se
+cortó, y no toca a las demás.
+
+**El login central es un caso aparte.** Su token es `API_TOKEN`, del `.env`,
+y el servicio registra esa aplicación solo al arrancar (`proyecto_id` NULL,
+o sea: ve todo). Cambiar la variable y reiniciar cambia su token; por eso esa
+fila no se revoca desde la API, se maneja desde el `.env`.
+
+`ADMIN_TOKEN` no está en esta tabla y no es el token de ninguna aplicación:
+si lo fuera, cualquier proyecto podría emitirse tokens nuevos o resetear
+contraseñas ajenas. Los dos valores tienen que ser distintos — la API se
+niega a arrancar si coinciden.
+
+### Contraseñas
+
+Se guardan hasheadas con **bcrypt** (cost 12, vía `bcryptjs`). Entran en la
+columna `password` (`VARCHAR(255)`) sin cambiar el esquema: un hash bcrypt
+son 60 caracteres.
+
+Tiene que tener **al menos 8 caracteres**, y bcrypt no mira más allá de los
+**72 bytes**, así que las más largas se rechazan con 422. Ojo con confundir
+ese límite con el `VARCHAR(255)`: los 255 son para el hash, no para la
+contraseña.
+
+Los emails se guardan y se buscan en minúsculas y sin espacios, para que el
+login no dependa de cómo los escriban.
+
+### Entrar a un proyecto
+
+Cada proyecto de la materia tiene su propia plataforma, y la persona entra
+**una vez** contra esta API, en el backend que haga de login. Después ese
+login la manda a su proyecto con un código de un solo uso, y ese proyecto lo
+canjea acá para enterarse de quién es. **Ningún proyecto ve una contraseña
+ni guarda una.**
+
+```text
+1. El login (con su token, proyecto_id NULL) pide el código:
+   POST /codigos  {"usuario_id": 1, "proyecto_id": 1}
+   -> {"codigo": "NCicTX...", "volver_a": "https://carpooling.../sesion", "segundos": 60}
+
+2. El navegador va a  https://carpooling.../sesion?codigo=NCicTX...
+
+3. El backend de Carpooling canjea, con SU token:
+   POST /codigos/canjear  {"codigo": "NCicTX..."}
+   -> {"usuario": {"id": 1, "nombre": "Ema", "apellido": "Ortiz",
+                   "email": "ortiz@gmail.com"},
+       "proyecto": {"id": 1, "nombre": "Carpooling"}}
+
+4. Carpooling emite SU sesión con eso. Listo.
+```
+
+Antes de que ande, la cátedra tiene que decir dónde vive cada proyecto:
+
+```bash
+curl -X PUT localhost:8000/proyectos/1/url \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"url":"https://carpooling.../sesion"}'
+```
+
+Esa URL es **la que ve el navegador**, no el nombre de un contenedor: el
+redirect lo hace el navegador de la persona, no un servidor.
+
+Por qué está armado así:
+
+* **El destino sale de `proyectos.url`, nunca del pedido.** Si el que pide el
+  código pudiera elegir a dónde mandarlo, se mandaría el código de otra
+  persona a un sitio propio y entraría como ella.
+* **Solo el login emite; solo el destinatario canjea.** Emitir un código es
+  afirmar "esta persona ya probó quién es", y el único que valida
+  contraseñas es el login. Un código solo lo canjea el proyecto al que va:
+  con el token de Carpooling no se canjea un código de Alquiler de Quintas.
+* **60 segundos y un solo uso** (`SEGUNDOS_DE_CODIGO`). Solo tiene que
+  sobrevivir un redirect; cuanto menos vive, menos importa que quede escrito
+  en el historial del navegador o en el log de algún servidor. Pedir uno
+  nuevo invalida el anterior.
+* **Mismo error para todo**: inventado, vencido, usado o de otro proyecto
+  responden 400 con `{"detail": "El codigo no sirve o ya vencio"}`.
+* **Sin URL no hay salto.** Si un proyecto todavía no tiene plataforma,
+  `POST /codigos` responde 409. Los proyectos se van sumando de a uno, sin
+  romper a los demás.
+
+### Reset de contraseña
+
+No hay "olvidé mi contraseña" automático: el servicio no manda mails, así
+que no tiene forma de comprobar que quien pide el reset sea la persona. Eso
+lo comprueba alguien de la cátedra por fuera del sistema, y recién entonces
+emite un token.
+
+```bash
+# 1. La cátedra pide el token
+curl -X POST localhost:8000/password/reset \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"email":"ortiz@gmail.com"}'
+
+# 2. Se lo hace llegar a la persona por donde sea. Se ve una sola vez.
+
+# 3. La persona elige su contraseña, sin que nadie más la conozca
+curl -X POST localhost:8000/password -H "Content-Type: application/json" \
+  -d '{"token":"XyK5...","password":"LaQueEllaElija"}'
+```
+
+* **30 minutos y un solo uso** (`MINUTOS_DE_RESET`). Pedir uno nuevo invalida
+  el anterior.
+* **Las sesiones abiertas no se cortan.** Las emite el login de cada
+  consumidor, no esta API, y acá no hay nada que revocar.
+
+### Ejecutar
+
+Todo con Docker. Las contraseñas de la base y los tokens salen de un `.env`
+que **no está en el repositorio**:
+
+```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
-Queda en `http://localhost:3001`.
+Completá antes en el `.env`: `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`,
+`API_TOKEN` y `ADMIN_TOKEN`. Sin `.env` el `up` corta con un error de
+variable faltante: es a propósito, para que nadie levante esto con las
+contraseñas del ejemplo.
 
-`.env`:
+| Variable | Para qué | Por defecto |
+|---|---|---|
+| `DB_NAME`, `DB_USER` | base y usuario que crea mysql | `registracion`, `registracion_user` |
+| `DB_PASSWORD` | contraseña de ese usuario, la misma de los dos lados | — (obligatoria) |
+| `MYSQL_ROOT_PASSWORD` | root de mysql, para dumps | — (obligatoria) |
+| `API_TOKEN` | token del login central, la app que ve todo el padrón | — (obligatoria) |
+| `ADMIN_TOKEN` | token de la cátedra: resets y alta de aplicaciones | — (obligatoria) |
+| `MINUTOS_DE_RESET` | cuánto vive un token de reset | `30` |
+| `SEGUNDOS_DE_CODIGO` | cuánto vive un código de ingreso a un proyecto | `60` |
+| `PUERTO_API`, `PUERTO_MYSQL` | puertos de la máquina | `8000`, `3307` |
+| `BIND_HOST` | interfaz donde se publican | `127.0.0.1` (solo esta máquina) |
 
-```text
-PADRON_URL=http://mock-service:8000    # nombre del servicio en la red de docker
-RED_PADRON=sistemaregistracion_default # la red que crea el compose del padrón
-PADRON_TOKEN=...                       # el API_TOKEN del padrón
-SESION_SECRETO=...                     # 32+ caracteres
-PUERTO_FRONT=3001
-```
+Al arrancar, el contenedor aplica las migraciones de Prisma pendientes y
+siembra los tres proyectos de la materia si no existen (es idempotente:
+correrlo de nuevo no duplica nada). No hace falta correr nada a mano.
 
-`PADRON_URL` no es `localhost`: adentro del contenedor `localhost` es el contenedor
-mismo. El padrón se resuelve por el nombre del servicio dentro de la red compartida, y
-por eso hay que levantarlo primero.
+API en `http://localhost:8000`.
 
-Un secreto de sesión nuevo:
-
-```bash
-docker run --rm node:20-alpine node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-### Antes de tocar el front
-
-Si esto no responde, el problema no está acá:
-
-```bash
-curl -H "Authorization: Bearer $PADRON_TOKEN" http://localhost:8000/usuarios
-```
-
-Y para ver qué le pasa a este:
-
-```bash
-docker compose logs -f login
-```
-
-## Estructura
+### Estructura
 
 ```
-src/
-  lib/
-    padron.ts         cliente del Sistema de Registración (solo servidor, lleva el Bearer)
-    firma.ts          firmar y verificar lo que se le confía al navegador (HMAC)
-    sesion.ts         cookie httpOnly firmada + resolver la sesión actual
-    ingreso.ts        cookie del proyecto del que vino, mientras se identifica
-    salida.ts         a dónde va apenas queda probada su identidad
-    errores.ts        código de error -> mensaje en pantalla
-    validaciones.ts   email, contraseña y proyecto, con los límites de las columnas
-    formularios.ts    estado compartido entre server actions y formularios
-    redirecciones.ts  redirect que funciona detrás del puerto de docker y para salir al proyecto
-  app/
-    entrar/           por acá llega la gente que viene de un proyecto
-    login/            página + server action
-    elegir-proyecto/  selector + `entrar/` (sella el proyecto cuando hay uno solo)
-    crear-cuenta/     página + server action (alta en un proyecto)
-    cuenta/           página protegida + salir
-    api/salir/        borra la cookie
-  components/         formularios de cliente
+api/
+  prisma/
+    schema.prisma        esquema de las 6 tablas
+    migrations/           historial de migraciones (se aplican solas al arrancar)
+    seed.ts                siembra los 3 proyectos de la materia
+  src/
+    index.ts                arma la app de Express y la levanta
+    config.ts                 variables de entorno, todas leídas acá
+    db.ts                      instancia única de PrismaClient
+    crypto.ts                   bcrypt, tokens al azar, hash de tokens
+    autenticacion.ts             token de aplicación, token de cátedra, largo de contraseña
+    validacion.ts                 leer y validar el cuerpo del pedido
+    errores.ts                     ErrorApi: status + mensaje, lo atrapa el middleware final
+    arrancar.ts                     sincroniza la aplicación del login desde API_TOKEN
+    rutas/
+      publicas.ts                    /, /login, /registrar, /proyectos
+      usuarios.ts                     /usuarios
+      password.ts                      /password/reset, /password
+      aplicaciones.ts                   /aplicaciones (POST, GET, DELETE)
+      proyectos-admin.ts                 /proyectos/{id}/url
+      codigos.ts                          /codigos, /codigos/canjear
 ```
 
-## Cosas del contrato que conviene tener presentes
+### Cosas del contrato que conviene tener presentes
 
-- **Se mira `error.codigo`, nunca el mensaje.** El mapeo está en `src/lib/errores.ts`.
-- **El email se normaliza** a minúsculas y sin espacios antes de mandarlo. El padrón
-  hace lo mismo de su lado, así que entrar con MAYÚSCULAS funciona igual.
-- **Los límites salen de `database/init.sql`**: nombre y apellido 50, email 100.
-  La contraseña no puede pasar de 72 bytes (es el límite de bcrypt, no el de la
-  columna). Se validan de este lado para no hacer el viaje al pedo.
-- **La sesión dura 24 h** y se corta de este lado: no hay token que revocar.
-- **`GET /usuarios` trae el padrón entero** y se lo consulta en cada página
-  protegida. Alcanza para la materia; si crece, lo que hay que pedir es
-  `GET /usuarios/{id}` y cambiar solo `buscarPorId` en `src/lib/padron.ts`.
-- **Nunca se guardan contraseñas ni hashes en este repo.** La fuente de verdad es
-  el padrón.
+* **Nunca se guardan contraseñas en texto plano ni se devuelven en ningún
+  endpoint.** La única forma de validar credenciales es `POST /login`.
+* **Los emails se normalizan** a minúsculas y sin espacios antes de
+  guardarse y de buscarse: entrar con MAYÚSCULAS funciona igual.
+* **Los límites salen de `prisma/schema.prisma`**: nombre y apellido 50,
+  email 100. La contraseña no puede pasar de 72 bytes (límite de bcrypt, no
+  de la columna).
+* **De los tokens (aplicaciones, códigos, resets) se guarda el hash**, nunca
+  el valor: un dump de la base no le sirve a nadie para entrar a ningún
+  lado ni cambiarle la contraseña a nadie.
+* **Los hashes de contraseña empiezan con `$2a$`**, no `$2b$` como en la
+  versión anterior en Python: es una diferencia de librería (`bcryptjs` en
+  vez de `bcrypt`), no de algoritmo — los dos son bcrypt cost 12 y se
+  verifican igual.

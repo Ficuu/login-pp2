@@ -1,30 +1,59 @@
 services:
 
-  login:
-    build: .
-    container_name: login_pp2
+  api:
+    build: ./api
+    container_name: padron_api
 
-    # Adentro escucha en el 3000; afuera sale por PUERTO_FRONT (3001 por
-    # defecto, para no chocar con otro Next levantado en el 3000).
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${PUERTO_FRONT:-3001}:3000"
+      - "${BIND_HOST:-127.0.0.1}:${PUERTO_API:-8000}:8000"
 
     environment:
-      # El padron se resuelve por el nombre del servicio DENTRO de la red de
-      # docker: `localhost` adentro del contenedor es el contenedor mismo, no
-      # la maquina.
-      PADRON_URL: ${PADRON_URL:-http://mock-service:8000}
-      PADRON_TOKEN: ${PADRON_TOKEN:?falta PADRON_TOKEN, copia .env.example a .env}
-      SESION_SECRETO: ${SESION_SECRETO:?falta SESION_SECRETO, copia .env.example a .env}
+      # DATABASE_URL usa el nombre del servicio (mysql), no localhost: adentro
+      # del contenedor localhost es el contenedor mismo.
+      DATABASE_URL: mysql://${DB_USER:-registracion_user}:${DB_PASSWORD:?falta DB_PASSWORD, copia .env.example a .env}@mysql:3306/${DB_NAME:-registracion}
 
-    networks:
-      - padron
+      # Token del login central, la única aplicación que ve el padrón entero.
+      API_TOKEN: ${API_TOKEN:?falta API_TOKEN, copia .env.example a .env}
+
+      # Token de la cátedra: resets de contraseña y alta de aplicaciones.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?falta ADMIN_TOKEN, copia .env.example a .env}
+
+      MINUTOS_DE_RESET: ${MINUTOS_DE_RESET:-30}
+      SEGUNDOS_DE_CODIGO: ${SEGUNDOS_DE_CODIGO:-60}
+
+    depends_on:
+      mysql:
+        condition: service_healthy
 
     restart: unless-stopped
 
-# La red la crea el compose del Sistema de Registración: este front se cuelga de
-# ahi, por eso `external`. Hay que levantar el padron primero.
-networks:
-  padron:
-    name: ${RED_PADRON:-sistemaregistracion_default}
-    external: true
+  mysql:
+    image: mysql:8.0
+    container_name: padron_mysql
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?falta MYSQL_ROOT_PASSWORD, copia .env.example a .env}
+      MYSQL_DATABASE: ${DB_NAME:-registracion}
+      MYSQL_USER: ${DB_USER:-registracion_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD, copia .env.example a .env}
+
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${PUERTO_MYSQL:-3307}:3306"
+
+    # Sin esto la API arranca antes de que mysql acepte conexiones y la
+    # primera migración falla: `depends_on` a secas solo espera a que el
+    # contenedor exista, no a que la base esté lista.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
