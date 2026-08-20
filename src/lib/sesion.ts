@@ -1,9 +1,9 @@
 import "server-only";
 
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { abrirFirmado, firmarContenido } from "./firma";
 import { buscarPorId, type Proyecto, type Usuario } from "./padron";
 
 /**
@@ -19,7 +19,6 @@ import { buscarPorId, type Proyecto, type Usuario } from "./padron";
 
 export const NOMBRE_COOKIE = "sesion_pp2";
 
-const SECRETO = process.env.SESION_SECRETO ?? "";
 const HORAS_DE_VIDA = 24;
 
 type Contenido = {
@@ -38,47 +37,10 @@ export type Sesion = {
   vence: Date;
 };
 
-function exigirSecreto(): string {
-  if (SECRETO.length < 32) {
-    // Sin secreto largo la firma no protege nada: cortamos antes de emitir.
-    console.error(
-      "[sesion] falta SESION_SECRETO (o es muy corto: mínimo 32 caracteres). " +
-        "Generá uno con: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
-    );
-    throw new Error("SESION_SECRETO no está configurado");
-  }
-
-  return SECRETO;
-}
-
-function firmar(cuerpo: string): string {
-  return createHmac("sha256", exigirSecreto()).update(cuerpo).digest("base64url");
-}
-
-function armarValor(contenido: Contenido): string {
-  const cuerpo = Buffer.from(JSON.stringify(contenido)).toString("base64url");
-  return `${cuerpo}.${firmar(cuerpo)}`;
-}
-
 /** Devuelve el contenido solo si la firma cierra y no venció. */
 function abrirValor(valor: string): Contenido | null {
-  const corte = valor.lastIndexOf(".");
-  if (corte < 1) return null;
-
-  const cuerpo = valor.slice(0, corte);
-  const firmaRecibida = Buffer.from(valor.slice(corte + 1), "base64url");
-  const firmaEsperada = Buffer.from(firmar(cuerpo), "base64url");
-
-  // Longitudes distintas hacen explotar timingSafeEqual, así que se chequean antes.
-  if (firmaRecibida.length !== firmaEsperada.length) return null;
-  if (!timingSafeEqual(firmaRecibida, firmaEsperada)) return null;
-
-  let contenido: Contenido;
-  try {
-    contenido = JSON.parse(Buffer.from(cuerpo, "base64url").toString());
-  } catch {
-    return null;
-  }
+  const contenido = abrirFirmado<Contenido>(valor);
+  if (!contenido) return null;
 
   if (!Number.isInteger(contenido.uid) || !Number.isFinite(contenido.exp)) return null;
   if (contenido.exp * 1000 <= Date.now()) return null;
@@ -104,7 +66,7 @@ export function cookieDeSesion(uid: number, pid: number | null, expSegundos?: nu
 
   return {
     nombre: NOMBRE_COOKIE,
-    valor: armarValor({ uid, pid, exp: Math.floor(vence.getTime() / 1000) }),
+    valor: firmarContenido({ uid, pid, exp: Math.floor(vence.getTime() / 1000) }),
     opciones: {
       httpOnly: true,
       sameSite: "lax" as const,

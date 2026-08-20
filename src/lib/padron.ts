@@ -485,12 +485,18 @@ export async function destinoDelProyecto(
   usuarioId: number,
   proyectoId: number,
   siNoHayProyecto = "/cuenta",
+  state: string | null = null,
 ): Promise<string> {
   const lanzamiento = await pedirCodigo(usuarioId, proyectoId);
   if (!lanzamiento) return siNoHayProyecto;
 
   const destino = new URL(lanzamiento.volverA);
   destino.searchParams.set("codigo", lanzamiento.codigo);
+
+  // El `state` es del proyecto: lo mandó él cuando empezó el circuito y se le
+  // devuelve tal cual, para que reconozca su propia ida y no acepte una vuelta
+  // que nunca empezó. Acá no se mira ni se usa para nada.
+  if (state) destino.searchParams.set("state", state);
 
   return destino.toString();
 }

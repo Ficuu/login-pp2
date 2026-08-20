@@ -97,6 +97,40 @@ Las contraseñas viven hasheadas allá (bcrypt) y la comparación pasa entera de
 padrón: **este front no sabe ni tiene que saber qué algoritmo se usa**, y nunca guarda
 una contraseña.
 
+### `/entrar`: llegar desde un proyecto
+
+El circuito normal no arranca acá: arranca en la plataforma del proyecto. Carpooling
+tiene un botón "Ingresar" que manda a:
+
+```text
+https://login.pp2/entrar?proyecto_id=1&state=algoAlAzar
+```
+
+Y ahí pasa una de tres:
+
+| Situación | Qué hace |
+|---|---|
+| Ya tiene sesión acá y está en ese proyecto | Vuelve al toque, sin que le pregunten nada |
+| No tiene sesión | Se guarda a dónde volver y va a `/login`; el login lo consume apenas la contraseña cierra |
+| Tiene cuenta pero no está en ese proyecto | Va al selector, con un aviso, a elegir uno de los suyos |
+
+El primer caso es el que hace que entrar al **segundo** proyecto de la materia no vuelva
+a pedir la contraseña: la identidad ya está probada, cambia el alcance nada más.
+
+El `proyecto_id` y el `state` quedan en una cookie firmada aparte (`ingreso_pp2`, 15
+minutos, `src/lib/ingreso.ts`), porque entre que llega y que se identifica hay un login
+de por medio. Va firmada por lo mismo que la de sesión: si se pudiera editar, alguien
+cambiaría el `pid` para salir hacia un proyecto que no le toca. Igual no alcanzaría —
+antes de emitir el código se verifica contra el padrón que esté en ese proyecto—, pero
+son dos puertas y no una.
+
+El `state` es del proyecto: viaja de ida y vuelve tal cual en la query, y acá no se mira
+ni se usa. Le sirve a él para reconocer su propia ida.
+
+Si la persona todavía no tiene cuenta y se va a `/crear-cuenta`, el proyecto del que
+vino **ya viene elegido** en el formulario: es a donde quería entrar, y elegir otro la
+dejaría afuera. Terminada el alta, vuelve ahí.
+
 ### Entrar es salir hacia el proyecto
 
 Este front es el login **central**: valida la identidad y después manda a la persona a
@@ -203,12 +237,16 @@ docker compose logs -f login
 src/
   lib/
     padron.ts         cliente del Sistema de Registración (solo servidor, lleva el Bearer)
+    firma.ts          firmar y verificar lo que se le confía al navegador (HMAC)
     sesion.ts         cookie httpOnly firmada + resolver la sesión actual
+    ingreso.ts        cookie del proyecto del que vino, mientras se identifica
+    salida.ts         a dónde va apenas queda probada su identidad
     errores.ts        código de error -> mensaje en pantalla
     validaciones.ts   email, contraseña y proyecto, con los límites de las columnas
     formularios.ts    estado compartido entre server actions y formularios
     redirecciones.ts  redirect que funciona detrás del puerto de docker y para salir al proyecto
   app/
+    entrar/           por acá llega la gente que viene de un proyecto
     login/            página + server action
     elegir-proyecto/  selector + `entrar/` (sella el proyecto cuando hay uno solo)
     crear-cuenta/     página + server action (alta en un proyecto)

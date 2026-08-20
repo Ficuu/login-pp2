@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { FormularioAlta } from "@/components/formulario-alta";
+import { leerIngresoPendiente } from "@/lib/ingreso";
 import { listarProyectos } from "@/lib/padron";
 import { obtenerSesion } from "@/lib/sesion";
 import { normalizarEmail } from "@/lib/validaciones";
@@ -19,6 +20,10 @@ export default async function PaginaAlta({ searchParams }: Props) {
   const proyectos = await listarProyectos();
   const emailInicial = searchParams.email ? normalizarEmail(searchParams.email) : "";
 
+  // Si llegó desde la plataforma de un proyecto, ese viene elegido: es al que
+  // quiere entrar, y elegir otro la dejaría afuera de donde estaba yendo.
+  const pendiente = leerIngresoPendiente();
+
   return (
     <>
       <div className="tarjeta">
@@ -28,7 +33,11 @@ export default async function PaginaAlta({ searchParams }: Props) {
           de la materia. Si ya tenés una, este formulario te suma al proyecto que elijas.
         </p>
 
-        <FormularioAlta proyectos={proyectos} emailInicial={emailInicial} />
+        <FormularioAlta
+          proyectos={proyectos}
+          emailInicial={emailInicial}
+          proyectoInicial={pendiente?.proyectoId ?? null}
+        />
       </div>
 
       <p className="pie">

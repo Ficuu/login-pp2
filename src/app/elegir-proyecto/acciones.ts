@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import type { EstadoFormulario } from "@/lib/formularios";
+import { borrarIngresoPendiente } from "@/lib/ingreso";
 import { buscarPorId, destinoDelProyecto } from "@/lib/padron";
 import { guardarCookieSesion, leerCookieSesion } from "@/lib/sesion";
 
@@ -39,6 +40,10 @@ export async function accionElegirProyecto(
   // cookie se guarda igual aunque el salto lleve a otra plataforma: la persona
   // sigue con sesión acá, para volver y cambiar de proyecto sin la contraseña.
   guardarCookieSesion(usuario.id, proyectoId, sesion.exp);
+
+  // Si había quedado un ingreso pendiente que no le correspondía (por eso está
+  // eligiendo a mano), se descarta: eligió, y eso manda.
+  borrarIngresoPendiente();
 
   const destino = await destinoDelProyecto(usuario.id, proyectoId);
 

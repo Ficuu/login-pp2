@@ -13,9 +13,11 @@ import { PASSWORD_MIN } from "@/lib/validaciones";
 type Props = {
   proyectos: Proyecto[];
   emailInicial?: string;
+  /** El proyecto del que vino, si llegó desde la plataforma de uno. */
+  proyectoInicial?: number | null;
 };
 
-export function FormularioAlta({ proyectos, emailInicial = "" }: Props) {
+export function FormularioAlta({ proyectos, emailInicial = "", proyectoInicial }: Props) {
   const [estado, accion] = useFormState(accionAlta, ESTADO_INICIAL);
   const valores = estado.valores ?? {};
   const email = valores.email ?? emailInicial;
@@ -79,7 +81,7 @@ export function FormularioAlta({ proyectos, emailInicial = "" }: Props) {
         <select
           id="proyecto_id"
           name="proyecto_id"
-          defaultValue={valores.proyecto_id ?? ""}
+          defaultValue={valores.proyecto_id ?? (proyectoInicial ? String(proyectoInicial) : "")}
           required
           aria-invalid={estado.campos?.proyecto_id ? "true" : undefined}
           aria-describedby={estado.campos?.proyecto_id ? "proyecto_id-error" : "proyecto_id-pista"}

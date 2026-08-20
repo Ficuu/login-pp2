@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
+import { borrarIngresoPendiente } from "@/lib/ingreso";
 import { destinoDelProyecto, login, registrar } from "@/lib/padron";
+import { destinoDelIngresoPendiente } from "@/lib/salida";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
@@ -71,6 +73,16 @@ export async function accionAlta(
   // si tiene una, y si no a la pantalla de este front, con la bienvenida.
   const yaEstaba = usuario.proyectos.length > 1;
   guardarCookieSesion(usuario.id, Number(proyecto));
+
+  // Si venía de la plataforma de un proyecto y se dio de alta ahí mismo, vuelve
+  // a donde estaba: es lo que quiso hacer desde el principio.
+  const pendiente = await destinoDelIngresoPendiente(usuario);
+
+  if (pendiente) {
+    guardarCookieSesion(usuario.id, pendiente.proyectoId);
+    borrarIngresoPendiente();
+    redirect(pendiente.destino);
+  }
 
   const destino = await destinoDelProyecto(
     usuario.id,

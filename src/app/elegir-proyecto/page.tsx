@@ -12,7 +12,16 @@ export const dynamic = "force-dynamic";
  * No es una pantalla de identidad: acá la contraseña ya se validó. Lo único que
  * se define es el alcance de la sesión.
  */
-export default async function PaginaElegirProyecto() {
+const AVISOS: Record<string, string> = {
+  "sin-ese-proyecto":
+    "No estás registrado en el proyecto desde el que venías. Elegí uno de los tuyos.",
+};
+
+type Props = {
+  searchParams: { motivo?: string };
+};
+
+export default async function PaginaElegirProyecto({ searchParams }: Props) {
   const sesion = leerCookieSesion();
   if (!sesion) redirect("/login");
 
@@ -31,6 +40,13 @@ export default async function PaginaElegirProyecto() {
     <>
       <div className="tarjeta">
         <h1>Elegí un proyecto</h1>
+
+        {searchParams.motivo && AVISOS[searchParams.motivo] ? (
+          <p className="alerta aviso" role="status">
+            {AVISOS[searchParams.motivo]}
+          </p>
+        ) : null}
+
         <p className="bajada">
           Hola {usuario.nombre}. Estás registrado en {usuario.proyectos.length} proyectos de
           la materia. Elegí con cuál querés trabajar; podés cambiarlo cuando quieras sin

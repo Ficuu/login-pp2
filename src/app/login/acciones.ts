@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 
 import { codigoDeError, erroresPorCampo, mensajeDeError } from "@/lib/errores";
 import type { EstadoFormulario } from "@/lib/formularios";
+import { borrarIngresoPendiente } from "@/lib/ingreso";
 import { destinoDelProyecto, login } from "@/lib/padron";
+import { destinoDelIngresoPendiente } from "@/lib/salida";
 import { guardarCookieSesion } from "@/lib/sesion";
 import {
   errorDeEmail,
@@ -49,6 +51,16 @@ export async function accionLogin(
       codigo: "SIN_PROYECTOS",
       valores: { email },
     };
+  }
+
+  // Si llegó desde la plataforma de un proyecto, vuelve ahí y no ve el
+  // selector: ya dijo a dónde iba antes de escribir la contraseña.
+  const pendiente = await destinoDelIngresoPendiente(usuario);
+
+  if (pendiente) {
+    guardarCookieSesion(usuario.id, pendiente.proyectoId);
+    borrarIngresoPendiente();
+    redirect(pendiente.destino);
   }
 
   // Con un solo proyecto no hay nada que elegir: se entra derecho.

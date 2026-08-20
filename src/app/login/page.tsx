@@ -12,6 +12,8 @@ const AVISOS: Record<string, string> = {
   cerrada: "Cerraste sesión.",
   "alta-ok": "Cuenta creada. Ingresá con tu email y contraseña.",
   "sin-proyectos": "Tu cuenta no está asignada a ningún proyecto. Pedile a la cátedra que te sume.",
+  "desde-proyecto": "Ingresá con tu cuenta de PP2 y volvés al proyecto.",
+  "proyecto-invalido": "Ese enlace no traía un proyecto válido. Ingresá y elegí uno.",
 };
 
 type Props = {
