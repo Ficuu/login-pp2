@@ -65,16 +65,20 @@ navegador ──(form, cookie httpOnly)──▶ backend del front ──(Bearer
                                         route handlers)
 ```
 
-## Lo que le falta al padrón
+## El contrato con el padrón
 
-El servicio hoy expone `GET /`, `POST /registrar` y `GET /usuarios`. Para que este
-front funcione bien hace falta esto, en este orden:
+El padrón expone lo que este front necesita (rama `claude/login-multiple-projects-5496rr`
+del [Sistema de Registración](https://github.com/DennisMejia21/SistemaRegistracion)):
 
-### 1. `POST /login` (imprescindible)
-
-Sin él no hay forma sana de validar credenciales.
-
+```text
+GET  /             estado del servicio
+POST /login        valida credenciales -> usuario + TODOS sus proyectos
+POST /registrar    alta, o vinculación a otro proyecto (pide la contraseña)
+GET  /usuarios     padrón completo          [Authorization: Bearer]
+GET  /proyectos    proyectos disponibles    [sin token, lo usa el alta]
 ```
+
+```text
 POST /login   { "email": "lopez@gmail.com", "password": "..." }
 
 200 { "id": 4, "nombre": "Fabian", "apellido": "Lopez", "email": "lopez@gmail.com",
@@ -82,85 +86,63 @@ POST /login   { "email": "lopez@gmail.com", "password": "..." }
 401 { "detail": "Credenciales invalidas" }
 ```
 
-Que devuelva `proyectos` en la misma respuesta es lo que permite resolver el
-selector sin un segundo pedido.
+Que `proyectos` venga en la misma respuesta es lo que permite resolver el selector sin
+un segundo pedido.
 
-### 2. Hashear las contraseñas
+Las contraseñas viven hasheadas allá (bcrypt) y la comparación pasa entera del lado del
+padrón: **este front no sabe ni tiene que saber qué algoritmo se usa**, y nunca guarda
+una contraseña.
 
-Hoy se guardan en texto plano (`main.py` inserta `datos.password` tal cual). Con
-**bcrypt** entran en la columna que ya existe (`VARCHAR(255)`; un hash bcrypt son
-60 caracteres), así que no hay que tocar el esquema:
+### El respaldo, si le pegás a un padrón viejo
 
-```python
-# requirements.txt: bcrypt
-import bcrypt
+Si `POST /login` devuelve 404, el cliente cae a comparar contra el `password` que venga
+en `GET /usuarios`. **Es un respaldo, no el diseño**: manda la tabla de contraseñas
+entera por la red en cada login, y deja de funcionar en cuanto estén hasheadas (el
+cliente lo detecta y lo dice en el log). Sirve para no quedar bloqueado, nada más.
 
-def hashear(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+Lo mismo con `GET /proyectos`: si no contesta, el alta usa los proyectos de la semilla
+de `database/init.sql`, pisables con la variable `PROYECTOS`.
 
-def verificar(password: str, guardado: str) -> bool:
-    return bcrypt.checkpw(password.encode(), guardado.encode())
-```
+## Levantarlo
 
-Con `POST /login` andando, **este front no necesita saber qué algoritmo se usa**:
-la comparación pasa entera del lado del padrón. Es el motivo principal para tener
-ese endpoint.
+Todo con docker: son dos stacks, primero el padrón (que crea la red) y después este.
 
-### 3. `POST /registrar` no verifica identidad
-
-Si el email ya existe, reusa ese `usuario_id` y lo vincula al proyecto nuevo **sin
-comprobar la contraseña**. Es decir:
-
-```bash
-curl -X POST http://localhost:8000/registrar -H "Content-Type: application/json" \
-  -d '{"nombre":"X","apellido":"X","email":"lopez@gmail.com","password":"cualquiera","proyecto_id":2}'
-```
-
-deja a quien lo mande vinculado a la cuenta de Fabián. Cuando el email ya existe,
-el alta debería exigir la contraseña de esa cuenta antes de agregar la fila en
-`usuario_proyecto`. Este front tapa el agujero por su lado (después del alta hace
-login con esas mismas credenciales, y si no cierran no deja entrar), pero el
-padrón queda expuesto a cualquier otro cliente.
-
-### 4. `GET /proyectos`
-
-Para que el alta ofrezca los proyectos reales. Mientras tanto se usan los de la
-semilla de `database/init.sql`, pisables con la variable `PROYECTOS`.
-
-### Mientras tanto
-
-Si `POST /login` devuelve 404, el cliente cae a comparar contra el `password` que
-venga en `GET /usuarios`. **Es un respaldo, no el diseño**: manda la tabla de
-contraseñas entera por la red en cada login, y deja de funcionar en cuanto se
-hasheen (el cliente lo detecta y lo dice en el log). Sirve para no quedar
-bloqueado, nada más.
-
-## Setup local
-
-Son dos servicios a la vez.
-
-### Terminal 1 — el padrón
+### 1. El padrón
 
 ```bash
 git clone -b servicio-registracion https://github.com/DennisMejia21/SistemaRegistracion
 cd SistemaRegistracion
-docker compose up --build      # API en :8000, phpMyAdmin en :8081
+cp .env.example .env           # completá DB_PASSWORD, MYSQL_ROOT_PASSWORD y API_TOKEN
+docker compose up -d --build   # API en :8000, phpMyAdmin en :8081
 ```
 
-### Terminal 2 — este repo
+### 2. Este repo
 
 ```bash
-npm install
-cp .env.example .env.local     # completá PADRON_TOKEN y SESION_SECRETO
-npm run dev -- -p 3001
+cp .env.example .env           # PADRON_TOKEN = el API_TOKEN de arriba, y un SESION_SECRETO
+docker compose up -d --build
 ```
 
-`.env.local`:
+Queda en `http://localhost:3001`.
 
+`.env`:
+
+```text
+PADRON_URL=http://mock-service:8000    # nombre del servicio en la red de docker
+RED_PADRON=sistemaregistracion_default # la red que crea el compose del padrón
+PADRON_TOKEN=...                       # el API_TOKEN del padrón
+SESION_SECRETO=...                     # 32+ caracteres
+PUERTO_FRONT=3001
 ```
-PADRON_URL="http://localhost:8000"
-PADRON_TOKEN="..."
-SESION_SECRETO="..."           # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+`PADRON_URL` no es `localhost`: adentro del contenedor `localhost` es el contenedor
+mismo. El padrón se resuelve por el nombre del servicio dentro de la red compartida, y
+por eso hay que levantarlo primero.
+
+Un secreto de sesión nuevo:
+
+```bash
+docker run --rm node:20-alpine node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ### Antes de tocar el front
@@ -169,6 +151,12 @@ Si esto no responde, el problema no está acá:
 
 ```bash
 curl -H "Authorization: Bearer $PADRON_TOKEN" http://localhost:8000/usuarios
+```
+
+Y para ver qué le pasa a este:
+
+```bash
+docker compose logs -f login
 ```
 
 ## Estructura
@@ -181,6 +169,7 @@ src/
     errores.ts        código de error -> mensaje en pantalla
     validaciones.ts   email, contraseña y proyecto, con los límites de las columnas
     formularios.ts    estado compartido entre server actions y formularios
+    redirecciones.ts  redirect con Location relativo (funciona detrás del puerto de docker)
   app/
     login/            página + server action
     elegir-proyecto/  selector + `entrar/` (sella el proyecto cuando hay uno solo)
@@ -193,10 +182,11 @@ src/
 ## Cosas del contrato que conviene tener presentes
 
 - **Se mira `error.codigo`, nunca el mensaje.** El mapeo está en `src/lib/errores.ts`.
-- **El email se normaliza** a minúsculas y sin espacios antes de mandarlo; el padrón
-  lo guarda tal cual llega.
-- **Los límites salen de `database/init.sql`**: nombre y apellido 50, email 100,
-  contraseña 255. Se validan de este lado para no hacer el viaje al pedo.
+- **El email se normaliza** a minúsculas y sin espacios antes de mandarlo. El padrón
+  hace lo mismo de su lado, así que entrar con MAYÚSCULAS funciona igual.
+- **Los límites salen de `database/init.sql`**: nombre y apellido 50, email 100.
+  La contraseña no puede pasar de 72 bytes (es el límite de bcrypt, no el de la
+  columna). Se validan de este lado para no hacer el viaje al pedo.
 - **La sesión dura 24 h** y se corta de este lado: no hay token que revocar.
 - **`GET /usuarios` trae el padrón entero** y se lo consulta en cada página
   protegida. Alcanza para la materia; si crece, lo que hay que pedir es

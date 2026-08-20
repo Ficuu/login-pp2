@@ -1,5 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
 
+import { redirigirA } from "@/lib/redirecciones";
 import { NOMBRE_COOKIE } from "@/lib/sesion";
 
 /**
@@ -14,10 +15,8 @@ import { NOMBRE_COOKIE } from "@/lib/sesion";
  */
 export function GET(request: NextRequest) {
   const motivo = request.nextUrl.searchParams.get("motivo") ?? "expirada";
-  const destino = new URL("/login", request.nextUrl.origin);
-  destino.searchParams.set("motivo", motivo);
 
-  const respuesta = NextResponse.redirect(destino);
+  const respuesta = redirigirA(`/login?motivo=${encodeURIComponent(motivo)}`);
   respuesta.cookies.delete(NOMBRE_COOKIE);
 
   return respuesta;

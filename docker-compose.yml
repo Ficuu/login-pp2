@@ -1,0 +1,30 @@
+services:
+
+  login:
+    build: .
+    container_name: login_pp2
+
+    # Adentro escucha en el 3000; afuera sale por PUERTO_FRONT (3001 por
+    # defecto, para no chocar con otro Next levantado en el 3000).
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${PUERTO_FRONT:-3001}:3000"
+
+    environment:
+      # El padron se resuelve por el nombre del servicio DENTRO de la red de
+      # docker: `localhost` adentro del contenedor es el contenedor mismo, no
+      # la maquina.
+      PADRON_URL: ${PADRON_URL:-http://mock-service:8000}
+      PADRON_TOKEN: ${PADRON_TOKEN:?falta PADRON_TOKEN, copia .env.example a .env}
+      SESION_SECRETO: ${SESION_SECRETO:?falta SESION_SECRETO, copia .env.example a .env}
+
+    networks:
+      - padron
+
+    restart: unless-stopped
+
+# La red la crea el compose del Sistema de Registración: este front se cuelga de
+# ahi, por eso `external`. Hay que levantar el padron primero.
+networks:
+  padron:
+    name: ${RED_PADRON:-sistemaregistracion_default}
+    external: true

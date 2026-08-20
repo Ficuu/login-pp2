@@ -1,6 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
 
 import { buscarPorId } from "@/lib/padron";
+import { redirigirA } from "@/lib/redirecciones";
 import { cookieDeSesion, leerCookieSesion } from "@/lib/sesion";
 
 /**
@@ -12,7 +13,7 @@ import { cookieDeSesion, leerCookieSesion } from "@/lib/sesion";
  */
 export async function GET(request: NextRequest) {
   const sesion = leerCookieSesion();
-  const aLogin = NextResponse.redirect(new URL("/login", request.nextUrl.origin));
+  const aLogin = redirigirA("/login");
   if (!sesion) return aLogin;
 
   const proyectoId = Number(request.nextUrl.searchParams.get("id"));
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   const usuario = await buscarPorId(sesion.uid);
   if (!usuario?.proyectos.some((proyecto) => proyecto.id === proyectoId)) return aLogin;
 
-  const respuesta = NextResponse.redirect(new URL("/cuenta", request.nextUrl.origin));
+  const respuesta = redirigirA("/cuenta");
   // Conserva el exp original: pasar por acá no renueva la sesión.
   const { nombre, valor, opciones } = cookieDeSesion(usuario.id, proyectoId, sesion.exp);
   respuesta.cookies.set(nombre, valor, opciones);
